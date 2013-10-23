@@ -1,0 +1,5 @@
+name = ADEF Camps
+description = A set of modules to use for ADEF Camps system
+core = 7.x
+package = ADEF
+version = 7.x-1.x-dev

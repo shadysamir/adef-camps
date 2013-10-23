@@ -1,0 +1,284 @@
+<?php
+
+/**
+ * Implements hook_permission();
+ */
+function adef_camps_permission() {
+  $perms['register participants'] = array(
+      'title' => t('Register Participants'),
+      'description' => t('Register particioants into sessions and modifies their registration')
+  );
+  $perms['session attendance'] = array(
+      'title' => t('Override Attendance Edit'),
+      'description' => t('Edit session attendance even if not registsred as session trainer.')
+  );
+  $perms['administer settings'] = array(
+      'title' => t('Administer Camps Settings'),
+      'description' => t('Administer general camps settings like dates.')
+  );
+  $perms['add incidents'] = array(
+      'title' => t('Add Incidents'),
+      'description' => t('Add incidents to participants.')
+  );
+  $perms['add achievements'] = array(
+      'title' => t('Add Achievments'),
+      'description' => t('Add achievements to particpants.')
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_menu();
+ */
+function adef_camps_menu() {
+  $items = array();
+  $items['node/%node/registeration'] = array(
+      'title' => 'Registration',
+      'page callback' => 'adef_camps_register',
+      'page arguments' => array(1),
+      'access arguments' => array(1),
+      'access callback' => 'adef_camps_participant_access',
+      'type' => MENU_LOCAL_TASK,
+      'file' => 'adef_camps.pages.inc',
+      'weight' => 100,
+  );
+  $items['node/%node/incident'] = array(
+      'title' => 'Incidents',
+      'page callback' => 'adef_camps_registry',
+      'page arguments' => array(1, 2),
+      'access arguments' => array(1),
+      'access callback' => 'adef_camps_participant_access',
+      'type' => MENU_LOCAL_TASK,
+      'file' => 'adef_camps.pages.inc',
+      'weight' => 101,
+  );
+  $items['node/%node/achievement'] = array(
+      'title' => 'Achievments',
+      'page callback' => 'adef_camps_registry',
+      'page arguments' => array(1, 2),
+      'access arguments' => array(1),
+      'access callback' => 'adef_camps_participant_access',
+      'type' => MENU_LOCAL_TASK,
+      'file' => 'adef_camps.pages.inc',
+      'weight' => 102,
+  );
+  $items['node/%node/schedule'] = array(
+      'title' => 'Schedule',
+      'page callback' => 'adef_camps_schedule',
+      'page arguments' => array(1),
+      'access arguments' => array(1),
+      'access callback' => 'adef_camps_participant_access',
+      'type' => MENU_LOCAL_TASK,
+      'file' => 'adef_camps.pages.inc',
+      'weight' => 98,
+  );
+  $items['node/%node/badges'] = array(
+      'title' => 'Badges',
+      'page callback' => 'adef_camps_badges',
+      'page arguments' => array(1),
+      'access arguments' => array(1),
+      'access callback' => 'adef_camps_participant_access',
+      'type' => MENU_LOCAL_TASK,
+      'file' => 'adef_camps.pages.inc',
+      'weight' => 99,
+  );
+  $items['adefcamps/registration/slots'] = array(
+      'type' => MENU_CALLBACK,
+      'access arguments' => array('register participants'),
+      'page callback' => 'adef_camps_registration_slots',
+      'file' => 'adef_camps.api.inc'
+  );
+  $items['adefcamps/badges/report'] = array(
+      'title' => 'Full Badges Report',
+      'type' => MENU_CALLBACK,
+      'access arguments' => array('register participants'),
+      'page callback' => 'adef_camps_badges_report',
+      'file' => 'adef_camps.pages.inc'
+  );
+//  $items['node/%node/attendance'] = array(
+//      'title' => 'Attendance',
+//      'page callback' => 'adef_camps_attendance',
+//      'page arguments' => array(1),
+//      'access arguments' => array(1),
+//      'access callback' => 'adef_camps_attendance_access',
+//      'type' => MENU_LOCAL_TASK,
+//      'file' => 'adef_camps.pages.inc',
+//      'weight' => 100,
+//  );
+  $items['admin/config/system/adefcamps'] = array(
+      'title' => 'ADEF Camps',
+      'page callback' => 'adef_camps_configure',
+      'access arguments' => array('administer settings'),
+      'file' => 'adef_camps_admin.inc'
+  );
+
+  return $items;
+}
+
+function adef_camps_participant_access($node) {
+  if ($node->type == 'participant' && (user_access('register participants') || user_access('add incidents') || user_access('add achievements'))) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+function adef_camps_attendance_access($node) {
+  if ($node->type == 'timespace') {
+    if (user_access('session attendance')) {
+      return TRUE;
+    }
+    global $user;
+    $trainers = views_get_view_result('content_blocks', 'block_trainers', $node->nid);
+    foreach ($trainers[0]->field_field_trainers as $trainer) {
+      if ($trainer['raw']['target_id'] == $user->uid) {
+        return TRUE;
+      }
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Implements hook_node_update();
+ * @todo test again but disable for now
+ */
+function adef_camps_node_update($node) {
+  switch ($node->type) {
+    case 'workshop':
+      break; //disabled
+      $query = new EntityFieldQuery();
+      $query->entityCondition('entity_type', 'node')
+              ->entityCondition('bundle', 'session')
+              ->fieldCondition('field_workshop', 'target_id', $node->nid, '=');
+      $result = $query->execute();
+      $nodes = array_keys($result['node']);
+      auto_nodetitle_operations_update($nodes);
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+ * Implements hook_node_insert();
+ */
+function adef_camps_node_insert($node) {
+  switch ($node->type) {
+    case 'workshop':
+      adef_camps_create_session_for_workshop($node);
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+ * Implements hook_rules_action_info();
+ */
+function adef_camps_rules_action_info() {
+  $items = array(
+      'adef_camps_action_updatesessions' => array(
+          'label' => t('Update title of related sessions.'),
+          'group' => t('ADEF Camps'),
+          'parameter' => array(
+              'nid' => array(
+                  'type' => 'integer',
+                  'label' => t('Node ID'),
+                  'description' => t('Node'),
+                  'restriction' => 'selector',
+                  'wrapped' => FALSE,
+                  'allow null' => FALSE,
+              ),
+          ),
+      ),
+  );
+  return $items;
+}
+
+function adef_camps_action_updatesessions($nid) {
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'node')
+          ->entityCondition('bundle', 'session')
+          ->fieldCondition('field_workshop', 'target_id', $nid, '=');
+  $result = $query->execute();
+  $nodes = array_keys($result['node']);
+  auto_nodetitle_operations_update($nodes);
+}
+
+function adef_camps_session_serial($node) {
+  
+}
+
+/**
+ * Implements hook_action_info();
+ */
+function adef_camps_action_info() {
+  $actions['adef_camps_create_session_for_workshop'] = array(
+      'type' => 'node',
+      'label' => t('Create related sessions.'),
+      'configurable' => FALSE,
+  );
+  return $actions;
+}
+
+function adef_camps_create_session_for_workshop($workshop_node) {
+  global $user;
+  $langcode = language_default('language');
+
+  $num_sessions = intval($workshop_node->field_number_sessions[LANGUAGE_NONE][0]['value']);
+  for ($i = 0; $i < $num_sessions; $i++) {
+    $node = new stdClass();
+    $node->type = "session";
+    node_object_prepare($node); // Sets some defaults. Invokes hook_prepare() and hook_node_prepare().
+    $node->language = $langcode; // Or e.g. 'en' if locale is enabled
+    $node->uid = $user->uid;
+    $node->status = 1; //(1 or 0): published or not
+    $node->promote = 0; //(1 or 0): promoted to front page
+
+    $node->field_workshop[LANGUAGE_NONE][] = array(
+        'target_id' => $workshop_node->nid,
+        'target_type' => 'node',
+    );
+
+    $node->title = "جلسة $workshop_node->title";
+    if ($num_sessions > 1) {
+      $node->title .= "-" . strval($i + 1);
+    }
+    $node->field_serial[LANGUAGE_NONE][0]['value'] = strval($i + 1);
+
+    $node = node_submit($node); // Prepare node for saving
+    node_save($node);
+  }
+
+
+
+  drupal_set_message(t('Corresponding session(s) created.'));
+}
+
+/*
+ * Get the current 2 day period start date based on camp start date and switch hour.
+ * @todo Use configuration options
+ */
+
+function adef_camps_get_period_date() {
+  $cur_date = getdate();
+  $day = $cur_date['mday'];
+  $hour = $cur_date['hours'];
+  $switch_hour = variable_get('adef_camps_switch_hour', 21);
+  $start_date = variable_get('adef_camps_start_date', array('year' => 2013, 'month' => 8, 'day' => 16));
+  $start_day = intval($start_date['day']);
+  if ($day == $start_day) {
+    return $start_date;
+  }
+  $day_diff = $day - $start_day;
+  $period_day = (intval($day_diff / 2) * 2) + $start_day;
+  if ($day == $period_day + 1 && $hour >= $switch_hour) {
+    $period_day += 2;
+  }
+  $start_date['day'] = $period_day;
+  //manual override for 2013
+  if ($start_date['day'] >= 25) {$start_date['day'] += 1;}
+  return $start_date;
+}

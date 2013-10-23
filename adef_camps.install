@@ -1,0 +1,5 @@
+<?php
+function adef_camps_install() {
+  variable_set('adef_camps_start_date', array('year' => 2013, 'month' => 8, 'day' => 16));
+  variable_set('adef_camps_switch_hour', 21);
+}
